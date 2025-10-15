@@ -1,0 +1,11 @@
+# Created by venv; see https://docs.python.org/3/library/venv.html
+
+# keep DB files ignored
+sqlite/*.db
+sqlite/*.sqlite
+sqlite/*.sqlite3
+share/
+
+# allow the notebook back in, order matters
+!sqlite/
+!sqlite/*.ipynb
