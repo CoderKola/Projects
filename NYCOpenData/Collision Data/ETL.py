@@ -1,7 +1,9 @@
+# Note, there are three kinds of sources of data:
+# Crashes, Vehicles, and Persons
+
 import logging 
 import requests
 import pandas as pd
-import sqlite3
 
 logging.basicConfig(
     level=logging.INFO,
@@ -9,14 +11,12 @@ logging.basicConfig(
     handlers=[logging.StreamHandler()]
 )
 
-# Constants
-OUTPUT_FILE = "collision_data.csv"
 REQUEST_LIMIT = 500
-COLLISION_DB = "collision_data.db"
+COLLISION_DB = "raw_master_collisions.db"
 
 # Headers 
 # Note: The headers are kept constant to prevent future schema changes
-HEADERS = [
+CRASH_HEADERS = [
     'crash_date', 'crash_time', 'borough', 'zip_code', 'latitude', 'longitude',
     'location', 'on_street_name', 'off_street_name', 'cross_street_name',
     'number_of_persons_injured', 'number_of_persons_killed',
@@ -30,19 +30,52 @@ HEADERS = [
     'vehicle_type_code_5'
 ]
 
+VEHICLES_HEADERS = [
+    'unique_id', 'collision_id', 'crash_date', 'crash_time', 'vehicle_id', 'state_registration',
+    'vehicle_type', 'vehicle_make', 'vehicle_model', 'vehicle_year', 'travel_direction', 'vehicle_occupants',
+    'driver_sex', 'driver_license_status', 'driver_license_jurisdiction', 'pre_crash', 'point_of_impact', 'vehicle_damage',
+    'vehicle_damage_2', 'vehicle_damage_3', 'public_property_damage', 'public_property_damage_type', 
+    'contributing_factor_1', 'contributing_factor_2'
+]
+
+PERSONS_HEADERS = [
+    'unique_id', 'collision_id', 'crash_date', 'crash_time', 'person_id', 'person_type', 'vehicle_id', 'person_age',
+    'ejection', 'emotional_status', 'bodily_injury', 'position_in_vehicle', 'safety_equipment', 'ped_location', 'ped_action',
+    'complaint', 'ped_role', 'contributing_factor_1', 'contributing_factor_2', 'person_sex'
+]
+
+# Constants
+OUTPUT_FILE = {
+    'crashes': {
+        'headers': CRASH_HEADERS,
+        'url': 'https://data.cityofnewyork.us/resource/h9gi-nx95',
+        'csv_name': 'collision_crash.csv',
+    },
+    'vehicles': {
+        'headers': VEHICLES_HEADERS,
+        'url': 'https://data.cityofnewyork.us/resource/bm4k-52h4',
+        'csv_name': 'collision_vehicle.csv',
+    },
+    'persons': {
+        'headers': PERSONS_HEADERS,
+        'url': 'https://data.cityofnewyork.us/resource/f55k-p6yu',
+        'csv_name': 'collision_person.csv',
+    }
+}
 
 # Scrape Function
-def scrape_nycopendata(dataframe):
+def scrape_nycopendata(dataframe, sourcetype):
     """
     Scrape data from NYC Open Data.
     """
     index = 0
+    offset = 500
     logging.info("Fetching data from NYC Open Data...")
 
     while True:
         try:
-            logging.info(f"""Record Range: {index} to {index + REQUEST_LIMIT}""")
-            response = requests.get(f'https://data.cityofnewyork.us/resource/h9gi-nx95.json?$limit={REQUEST_LIMIT}&$offset={index + REQUEST_LIMIT}')
+            logging.info(f"""Record Range: {index} to {offset}""")
+            response = requests.get(f'{sourcetype}.json?$limit={REQUEST_LIMIT}&$offset={offset}')
             
             if response.status_code == 200:
                 logging.info(f"URL: {response.url}")
@@ -50,51 +83,51 @@ def scrape_nycopendata(dataframe):
 
                 if not data.empty:
                     logging.info(f"Fetched {len(data)} records.")
-                    dataframe = pd.concat([dataframe, data], ignore_index=True).drop_duplicates(subset=['collision_id'])
-                    index += REQUEST_LIMIT
+                    dataframe = pd.concat([dataframe, data], ignore_index=True)
+                    index = offset
+                    offset += REQUEST_LIMIT
                     
-                    if len(dataframe) >= 1000:
+                    if offset >= 1001:
                         logging.info(f"Reached temporary limit of 1000 records.")
+                        index, offset = 0, 0
                         return dataframe
                 
                 else:
                     logging.info("No more data to fetch.")
+                    index, offset = 0, 500
                     return dataframe
 
         except Exception as e:
             logging.error(f"Error fetching data: {e}")
             break
 
-
-
-
-
-
-# Database Function
-def create_database(dataframe, db_name=COLLISION_DB):
+def process_etl(key, value, dataframe):
     """
-    Create SQLite database and store the dataframe.
+    Process ETL for a given key, value and dataframe.
     """
-    try:
-        conn = sqlite3.connect(db_name)
-        dataframe.to_sql(name='collisions', con=conn, index=False)
-        conn.close()
-        logging.info(f"Database {db_name} created successfully.")
-    except Exception as e:
-        logging.error(f"Error creating database: {e}")
-
+    logging.info(f"------Starting ETL for {key}------")
+    dataframe = scrape_nycopendata(dataframe=dataframe, sourcetype=value['url'])
+    dataframe.to_csv(value['csv_name'], index=False)
+    logging.info(f"Saved {len(dataframe)} records to {value['csv_name']}")
+    return dataframe
 
 # Main Function
 def main():
-    # Initialize dataframe
-    collision_data = pd.DataFrame(columns=HEADERS)
+    # Create three dataframes for each source type
+    crash_data = pd.DataFrame(columns=OUTPUT_FILE['crashes']['headers'])
+    vehicle_data = pd.DataFrame(columns=OUTPUT_FILE['vehicles']['headers'])
+    person_data = pd.DataFrame(columns=OUTPUT_FILE['persons']['headers'])
 
-    # Scrape Data, returns a dataframe
-    collision_data = scrape_nycopendata(dataframe=collision_data)
+    # Map keys to respective dataframes
+    dataframes = {
+        'crashes': crash_data,
+        'vehicles': vehicle_data,
+        'persons': person_data,
+    }
 
-    # Save to CSV
-    collision_data.to_csv(OUTPUT_FILE, index=False)
-    logging.info(f"Data saved to {OUTPUT_FILE}")
+    # Process ETL for each source type
+    for key, value in OUTPUT_FILE.items():
+        dataframes[key] = process_etl(key, value, dataframes[key])
 
 
 # Main Execution
