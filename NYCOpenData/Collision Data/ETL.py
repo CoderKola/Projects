@@ -66,6 +66,10 @@ def scrape_nycopendata(dataframe):
             break
 
 
+
+
+
+
 # Database Function
 def create_database(dataframe, db_name=COLLISION_DB):
     """
