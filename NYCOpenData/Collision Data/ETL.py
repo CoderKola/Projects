@@ -1,12 +1,20 @@
-import pandas as pd
+import logging 
 import requests
-import sqlite3
+import pandas as pd
 
-# Scopred out headings from NYCOpenData portal
-# Heaeders from source: https://data.cityofnewyork.us/Public-Safety/Motor-Vehicle-Collisions-Crashes/h9gi-nx95/about_data
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler()]
+)
 
-print("Setting headers for DataFrame...")
-collision_data_headers = [
+# Constants
+OUTPUT_FILE = "collision_data.csv"
+REQUEST_LIMIT = 500
+
+# Headers 
+# Note: The headers are kept constant to prevent future schema changes
+HEADERS = [
     'crash_date', 'crash_time', 'borough', 'zip_code', 'latitude', 'longitude',
     'location', 'on_street_name', 'off_street_name', 'cross_street_name',
     'number_of_persons_injured', 'number_of_persons_killed',
@@ -20,49 +28,54 @@ collision_data_headers = [
     'vehicle_type_code_5'
 ]
 
-# Create empty DataFrame with headers
-collision_data = pd.DataFrame(columns=collision_data_headers)
-print("Empty DataFrame created with headers.")
+
+# Scrape Function
+def scrape_nycopendata(dataframe):
+    """
+    Scrape data from NYC Open Data.
+    """
+    index = 0
+    logging.info("Fetching data from NYC Open Data...")
+
+    while True:
+        try:
+            logging.info(f"""Record Range: {index} to {index + REQUEST_LIMIT}""")
+            response = requests.get(f'https://data.cityofnewyork.us/resource/h9gi-nx95.json?$limit={REQUEST_LIMIT}&$offset={index + REQUEST_LIMIT}')
+            
+            if response.status_code == 200:
+                logging.info(f"Fetching data from URL: {response.url}")
+                data = pd.DataFrame(response.json())
+
+                if not data.empty:
+                    logging.info(f"Fetched {len(data)} records.")
+                    dataframe = pd.concat([dataframe, data], ignore_index=True).drop_duplicates(subset=['collision_id'])
+                    index += REQUEST_LIMIT
+                    
+                    if len(dataframe) >= 1000:
+                        logging.info(f"Reached temporary limit of 1000 records.")
+                        return dataframe
+                
+                else:
+                    logging.info("No more data to fetch.")
+                    return dataframe
+
+        except Exception as e:
+            logging.error(f"Error fetching data: {e}")
+            break
 
 
-# Creating record fetch settings for NYCopenData API
-num_of_records = 100 # number of records per API fetch
-starting_page = 0
-ending_page = 100
+# Main Function
+def main():
+    # Initialize dataframe
+    collision_data = pd.DataFrame(columns=HEADERS)
 
-while True:
-    try:
-        print(f"\n--------------------\nCalling URL with 'offset' or records {starting_page} to {ending_page}, with record per call size of {num_of_records}")
-        response = requests.get(f'https://data.cityofnewyork.us/resource/h9gi-nx95.json?$limit={num_of_records}&$offset={ending_page}')
+    # Scrape Data, returns a dataframe
+    collision_data = scrape_nycopendata(dataframe=collision_data)
 
-        if response.status_code == 200:
-            print("Response: ", response.status_code)
-            data = pd.DataFrame(response.json())
-
-            if not data.empty:
-                collision_data = pd.concat([collision_data, data], ignore_index=True)
-                print(f"✅ Fetched {len(data)} records, total records so far: {len(collision_data)}")
-                starting_page = ending_page
-                ending_page += 100
-
-                # COMMENT OUT IF IN PRODUCTION
-                if starting_page >= 500:
-                    print("Reached Temporary Limit of 500 records.")
-                    break
-
-            if data.empty:
-                print("No more data to fetch.")
-                break
-
-    except Exception as e:
-        print("An error occured: ", e)
+    # Save to CSV
+    collision_data.to_csv(OUTPUT_FILE, index=False)
 
 
-print("\n--------------------\nData fetching complete.")
-
-# Save to CSV
-collision_data.to_csv("collision_data.csv", index=False)
-print("Data saved to 'collision_data.csv'.")
-
-# Transform Raw Data - Data Cleaning
-print("\n--------------------\nStarting Data Cleaning...")
+# Main Execution
+if __name__ == "__main__":
+    main()
