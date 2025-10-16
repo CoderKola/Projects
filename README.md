@@ -11,6 +11,7 @@ Contains details of crash events.
 * [Motor Vehicle Collisions - Person](https://data.cityofnewyork.us/Public-Safety/Motor-Vehicle-Collisions-Person/f55k-p6yu/about_data)
 Contains details for people involved in crash.
 
+```HTML
 ETL Goal:
 - [x] Scrape MVC - Crashes
 - [ ] Scrape MVC - Vehicles
@@ -18,4 +19,5 @@ ETL Goal:
 - [ ] ETL these and upload into DB
 - [ ] Begin Analysis
 - [ ] Web App to View Data and Analytics
+```
 </details>
