@@ -1,16 +1,18 @@
 import logging 
 import requests
 import pandas as pd
+import sqlite3
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
+    format="%(asctime)s - %(message)s",
     handlers=[logging.StreamHandler()]
 )
 
 # Constants
 OUTPUT_FILE = "collision_data.csv"
 REQUEST_LIMIT = 500
+COLLISION_DB = "collision_data.db"
 
 # Headers 
 # Note: The headers are kept constant to prevent future schema changes
@@ -43,7 +45,7 @@ def scrape_nycopendata(dataframe):
             response = requests.get(f'https://data.cityofnewyork.us/resource/h9gi-nx95.json?$limit={REQUEST_LIMIT}&$offset={index + REQUEST_LIMIT}')
             
             if response.status_code == 200:
-                logging.info(f"Fetching data from URL: {response.url}")
+                logging.info(f"URL: {response.url}")
                 data = pd.DataFrame(response.json())
 
                 if not data.empty:
@@ -64,6 +66,20 @@ def scrape_nycopendata(dataframe):
             break
 
 
+# Database Function
+def create_database(dataframe, db_name=COLLISION_DB):
+    """
+    Create SQLite database and store the dataframe.
+    """
+    try:
+        conn = sqlite3.connect(db_name)
+        dataframe.to_sql(name='collisions', con=conn, index=False)
+        conn.close()
+        logging.info(f"Database {db_name} created successfully.")
+    except Exception as e:
+        logging.error(f"Error creating database: {e}")
+
+
 # Main Function
 def main():
     # Initialize dataframe
@@ -74,6 +90,7 @@ def main():
 
     # Save to CSV
     collision_data.to_csv(OUTPUT_FILE, index=False)
+    logging.info(f"Data saved to {OUTPUT_FILE}")
 
 
 # Main Execution
