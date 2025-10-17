@@ -141,7 +141,10 @@ def main():
     # Transform each set of data
     crash_transformed =  transform_crash_data(dataframes['crashes'])
     vehicle_transformed = transform_vehicle_data(dataframes['vehicles'])
+    
+    # Print to csv
     crash_transformed.to_csv('test.csv', index=False)
+    vehicle_transformed.to_csv('vehicle_test.csv', index=False)
 
 # Main Execution
 if __name__ == "__main__":
