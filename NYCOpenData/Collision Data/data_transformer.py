@@ -78,7 +78,7 @@ def transform_vehicle_data(crash_vehicle_df: pd.DataFrame) -> pd.DataFrame:
     columns_to_drop = ['contributing_factor_1', 'contributing_factor_2', 'crash_date', 'crash_time']
     crash_vehicle_df.drop(columns=columns_to_drop, axis=1, inplace=True)
 
-    crash_vehicle_df = crash_vehicle_df.rename(columns={'unique_id': 'vehicle_unique_id'})
+    crash_vehicle_df = crash_vehicle_df.rename(columns={'unique_id': 'unique_vehicle_record_id'})
 
     return crash_vehicle_df
 
