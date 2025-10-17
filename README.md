@@ -14,7 +14,7 @@ Contains details for people involved in crash.
 
 ## ETL Goal:
 - [x] Scrape MVC - Crashes
-- [ ] Scrape MVC - Vehicles
+- [x] Scrape MVC - Vehicles
 - [ ] Scrape MVC - Person
 - [ ] ETL these and upload into DB
 - [ ] Begin Analysis
