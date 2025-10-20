@@ -169,13 +169,6 @@ def main():
                 # Uncomment to output transformed data
                 person_data_transformed.to_csv('transformed_collision_person.csv', index=False)
 
-    # Normalize key types so matches actually happen
-    for df in [crash_data_transformed, vehicle_data_transformed, person_data_transformed]:
-        for k in ['collision_id', 'vehicle_id']:
-            if k in df.columns:
-                df[k] = df[k].astype(str).str.strip()  # or .astype('int64') if numeric everywhere
-    
-
     # Merge crash → vehicles (1-to-many)
     cv = crash_data_transformed.merge(
         vehicle_data_transformed,
@@ -185,17 +178,14 @@ def main():
         validate='one_to_many'      # guards assumptions
     )
 
-    # TODO: Getting error that there are many crash -> vehicle in left dataset, need to investigate
-    #     raise MergeError(
-    #     "Merge keys are not unique in left dataset; not a one-to-many merge"
-    # )
-    #  Merge (crash+vehicle) → persons (1 vehicle-to-many persons)
+    cv.to_csv('crash_vehicle_data_merge1.csv', index=False)
+
     final_df = cv.merge(
         person_data_transformed,
         how='left',                 # use 'inner' if you only want vehicles that have at least one person
         on=['collision_id', 'vehicle_id'],
         suffixes=('', '_person'),
-        validate='one_to_many'
+        validate='many_to_many'
     )
 
     final_df.to_csv('final_collision_data.csv', index=False)
