@@ -3,11 +3,11 @@
 
 import datetime as dt
 import logging
+import os
 import pandas as pd
-import requests
-import time
 
-from data_transformer import transform_crash_data, transform_vehicle_data, transform_person_data
+from other_functions.data_transformer import transform_crash_data, transform_vehicle_data, transform_person_data
+from other_functions.scrape_nycopendata_collisions import scrape_nycopendata
 
 logging.basicConfig(
     level=logging.INFO,
@@ -15,8 +15,12 @@ logging.basicConfig(
     handlers=[logging.StreamHandler()]
 )
 
+# Data file output directory
+DATA_OUTPUT_DIR = "data"
+if not os.path.exists(DATA_OUTPUT_DIR):
+    os.makedirs(DATA_OUTPUT_DIR)
+
 REQUEST_LIMIT = 1000000
-COLLISION_DB = "raw_master_collisions.db"
 
 # Headers > Note: The headers are kept constant to prevent future schema changes
 # Note, there is no unique_id in crash data. Row id is collision_id
@@ -68,73 +72,6 @@ OUTPUT_FILE = {
         'csv_name': 'collision_person.csv',
     }
 }
-# Function to scrape NYC Open Data
-def scrape_nycopendata(name, dataframe, sourcetype):
-    index = 0
-    offset = REQUEST_LIMIT
-    dup_csv = "crash_duplicates.csv" # This is required just to doucment duplicates found in 'crash' if the source is incorrect
-    header_written = False  # write CSV header once per run
-
-    while True:
-        try:
-            logging.info(f"Record Range: {index} to {offset}")
-            response = requests.get(f"{sourcetype}.json?$limit={REQUEST_LIMIT}&$offset={offset}")
-            if response.status_code != 200:
-                logging.error(f"HTTP {response.status_code}")
-                return dataframe
-
-            data = pd.DataFrame(response.json())
-            if data.empty:
-                logging.info("No more data to fetch.")
-                return dataframe
-
-            logging.info(f"Fetched {len(data)} records.")
-
-            if name == "crashes":
-                # Condition A: duplicates inside this fetched batch
-                duplicates_inside_batch = data["collision_id"].duplicated(keep=False)
-
-                # Condition B: ids that already exist in the accumulated dataframe
-                existing_ids = set(dataframe["collision_id"].dropna())
-                duplicates_against_existing = data["collision_id"].isin(existing_ids)
-
-                # Any row that meets A or B is a duplicate we want to log
-                duplicates_any = duplicates_inside_batch | duplicates_against_existing
-                count_any = int(duplicates_any.sum())
-
-                if count_any:
-                    logging.info(
-                        f"Duplicates this batch: {count_any} "
-                        f"(within={int(duplicates_inside_batch.sum())}, "
-                        f"overlap={int(duplicates_against_existing.sum())})"
-                    )
-                    # Append those duplicate rows to CSV (header once per run)
-                    data.loc[duplicates_any].to_csv(
-                        dup_csv, mode="a", index=False, header=not header_written
-                    )
-                    header_written = True
-
-                # Combine new and existing, then keep the last version per collision_id
-                dataframe = (
-                    pd.concat([dataframe, data], ignore_index=False)
-                      .drop_duplicates(subset=["collision_id"], keep="last")
-                      .reindex(columns=dataframe.columns)
-                )
-            else:
-                # Non-crash datasets: just append and align columns
-                dataframe = (
-                    pd.concat([dataframe, data], ignore_index=False)
-                      .reindex(columns=dataframe.columns)
-                )
-
-            index = offset
-            offset += REQUEST_LIMIT
-            time.sleep(0.5)
-
-        except Exception as e:
-            logging.error(f"Error fetching data: {e}")
-            return dataframe
-
 # Main Function
 def main():
     # Create three dataframes for each source type
@@ -152,44 +89,53 @@ def main():
     # Process extraction for each source type
     for key, value in OUTPUT_FILE.items():
         logging.info(f"🎬 Starting NYCOpenData scrape for {key}...")
-        dataframes[key] = scrape_nycopendata(name=key, dataframe=dataframes[key], sourcetype=value['url'])
+        dataframes[key] = scrape_nycopendata(name=key, dataframe=dataframes[key], sourcetype=value['url'], request_limit=REQUEST_LIMIT, data_output_dir=DATA_OUTPUT_DIR)
         logging.info(f"✅ Completed NYCOpenData scrape for {key}.\n")
 
         match key:
             case 'crashes':
                 crash_data_transformed = transform_crash_data(dataframes['crashes'])
                 # Uncomment to output transformed data
-                crash_data_transformed.to_csv('transformed_collision_crash.csv', index=False)
+                crash_data_transformed.to_csv(os.path.join(DATA_OUTPUT_DIR, 'transformed_collision_crash.csv'), index=False)
             case 'vehicles':
                 vehicle_data_transformed = transform_vehicle_data(dataframes['vehicles'])
                 # Uncomment to output transformed data
-                vehicle_data_transformed.to_csv('transformed_collision_vehicle.csv', index=False)
+                vehicle_data_transformed.to_csv(os.path.join(DATA_OUTPUT_DIR, 'transformed_collision_vehicle.csv'), index=False)
             case 'persons':
                 person_data_transformed = transform_person_data(dataframes['persons'])
                 # Uncomment to output transformed data
-                person_data_transformed.to_csv('transformed_collision_person.csv', index=False)
+                person_data_transformed.to_csv(os.path.join(DATA_OUTPUT_DIR, 'transformed_collision_person.csv'), index=False)
 
     # Merge crash → vehicles (1-to-many)
     cv = crash_data_transformed.merge(
         vehicle_data_transformed,
-        how='left',                 # use 'inner' only if you truly want to drop crashes without vehicles
+        how='left',
         on='collision_id',
         suffixes=('_crash', '_vehicle'),
         validate='one_to_many'      # guards assumptions
     )
 
-    cv.to_csv('crash_vehicle_data_merge1.csv', index=False)
+    # Once merged, the 'unique_id' is for vehicle record which we need to merge to person data
+    # If this is blank, we need to generate a merge_key_vehicle as "{collision_id}_NULL"    
+    cv['merge_key_vehicle'] = cv.apply(
+        lambda row: f"{row['collision_id']}_NULL" if pd.isna(row.get('unique_id')) or str(row['unique_id']).strip() == '' 
+        else f"{row['collision_id']}_{row['unique_id']}", axis=1
+    )
+    cv.to_csv(os.path.join(DATA_OUTPUT_DIR, 'crash_vehicle_data_merge1.csv'), index=False)
 
     final_df = cv.merge(
         person_data_transformed,
-        how='left',                 # use 'inner' if you only want vehicles that have at least one person
-        on=['collision_id', 'vehicle_id'],
+        how='left',
+        left_on='merge_key_vehicle',
+        right_on='merge_key_person',
         suffixes=('', '_person'),
-        validate='many_to_many'
+        validate='one_to_many'
     )
 
-    final_df.to_csv('final_collision_data.csv', index=False)
+    final_df.to_csv(os.path.join(DATA_OUTPUT_DIR, 'final_collision_data.csv'), index=False)
 
 # Main Execution
 if __name__ == "__main__":
+    logging.info("🎬 Starting NYCOpenData Collision- Crash, Vehicle, and Person ETL Pipeline...")
     main()
+    logging.info("✅ Completed NYCOpenData Collision- Crash, Vehicle, and Person ETL Pipeline.")

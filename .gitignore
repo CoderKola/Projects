@@ -1,1 +1,7 @@
 # Created by venv; see https://docs.python.org/3/library/venv.html
+
+# Ignore all files in the data folder
+data/
+
+# Ignore csv files
+*.csv

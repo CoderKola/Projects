@@ -70,7 +70,7 @@ def transform_crash_data(crash_df: pd.DataFrame) -> pd.DataFrame:
 
     # Rename unique_id to crashtable_record_id
     crash_df = crash_df.rename(columns={'unique_id': 'crashtable_record_id'})
-
+    
     return crash_df
 
 # Transform Vehicle Dataframe
@@ -84,10 +84,20 @@ def transform_vehicle_data(crash_vehicle_df: pd.DataFrame) -> pd.DataFrame:
 
     # rename unique_id to unique_vehicle_record_id
     crash_vehicle_df = crash_vehicle_df.rename(columns={
-        'unique_id': 'vehicletable_record_id',
         'contributing_factor_1': 'vehicle_contributing_factor_1',
         'contributing_factor_2': 'vehicle_contributing_factor_2'
         })
+    
+    # Generate merge key to join to person data
+    crash_vehicle_df['merge_key_vehicle'] = crash_vehicle_df['collision_id'].astype(str) + '_' + crash_vehicle_df['unique_id'].astype(str)
+
+    # Save duplicate merge keys to csv BEFORE dropping duplicates
+    duplicate_merge_keys = crash_vehicle_df.duplicated(subset=['merge_key_vehicle'], keep=False)
+    duplicate_merge_keys_df = crash_vehicle_df[duplicate_merge_keys]
+    duplicate_merge_keys_df.to_csv('duplicate_merge_keys_vehicle.csv', index=False)
+    
+    # Drop records where merge_key_vehicle is duplicated, keeping the first occurrence
+    crash_vehicle_df = crash_vehicle_df.drop_duplicates(subset=['merge_key_vehicle'])
 
     return crash_vehicle_df
 
@@ -102,9 +112,13 @@ def transform_person_data(crash_person_df: pd.DataFrame) -> pd.DataFrame:
 
     # Rename crash record id to unique_person_record_id
     crash_person_df = crash_person_df.rename(columns={
-        'unique_id': 'persontable_record_id',
         'contributing_factor_1': 'person_contributing_factor_1',
         'contributing_factor_2': 'person_contributing_factor_2'
         })
+
+    # Generate merge key to join to vehicle data
+    crash_person_df['merge_key_person'] = crash_person_df.apply(
+        lambda row: f"{row['collision_id']}_NULL" if pd.isna(row['vehicle_id']) or str(row['vehicle_id']).strip() == '' 
+        else f"{row['collision_id']}_{row['vehicle_id']}", axis=1)
 
     return crash_person_df
